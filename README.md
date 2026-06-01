@@ -8,3 +8,6 @@ Selamat datang di website resmi kami. Kami menyediakan berbagai layanan dan solu
 * Otomatisasi Sistem Kerja
 
 Hubungi kami untuk kerja sama lebih lanjut!
+## Kontak Kami:
+Jika Anda tertarik untuk menggunakan layanan kami atau ingin bertanya lebih lanjut, silakan hubungi kami melalui tombol di bawah ini:
+👉 [Hubungi via WhatsApp (Klik di Sini)](https://wa.me/6283857004888?text=Halo%20Agen%20AI%20Dodi%20saya%20tertarik%20dengan%20layanan%20Anda)
