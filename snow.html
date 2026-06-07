@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Hand Snow</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; color: #fff; touch-action: none; }
+#container { position: relative; width: 100vw; height: 100vh; }
+#video { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.9; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#ui { position: absolute; top: 16px; left: 16px; z-index: 10; background: rgba(0,20,40,0.7); border: 1px solid rgba(150,220,255,0.3); border-radius: 10px; padding: 10px 14px; font-size: 11px; line-height: 1.8; }
+#ui .label { color: #88ccff; } #ui .val { color: #fff; font-weight: bold; }
+#status { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); font-size: 13px; color: rgba(200,230,255,0.9); z-index: 10; background: rgba(0,20,40,0.6); padding: 8px 18px; border-radius: 20px; white-space: nowrap; }
+#loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg,#0a1628,#000); z-index: 100; gap: 16px; }
+#loading h1 { font-size: 28px; color: #fff; letter-spacing: 6px; text-shadow: 0 0 20px #aaddff; }
+#loading p { color: #557799; font-size: 13px; }
+.spinner { width: 40px; height: 40px; border: 3px solid #112233; border-top-color: #88ccff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#startBtn { padding: 14px 32px; background: rgba(100,180,255,0.15); border: 1px solid #88ccff; color: #aaddff; font-family: inherit; font-size: 15px; border-radius: 30px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="ui">
+    <div><span class="label">Tangan: </span><span class="val" id="handCount">0</span></div>
+    <div><span class="label">Salju: </span><span class="val" id="particleCount">0</span></div>
+    <div><span class="label">FPS: </span><span class="val" id="fps">0</span></div>
+  </div>
+  <div id="status">Arahkan tangan ke kamera 🖐️</div>
+</div>
+<div id="loading">
+  <h1>❄️ SNOWFALL ❄️</h1>
+  <p>Memuat hand tracking...</p>
+  <div class="spinner" id="spinner"></div>
+  <button id="startBtn" style="display:none" onclick="startApp()">🖐️ Mulai & Izinkan Kamera</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script>
+const video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+let particles=[],handLandmarks=[],hands;
+class Snow{constructor(){this.reset(true);}reset(init){this.x=Math.random()*W;this.y=init?Math.random()*H:-10;this.vx=(Math.random()-.5)*0.5;this.vy=0.5+Math.random()*1.5;this.r=2+Math.random()*5;this.alpha=0.6+Math.random()*0.4;this.wobble=Math.random()*Math.PI*2;this.wobbleSpeed=0.02+Math.random()*0.03;this.sparkle=Math.random()>0.8;}update(h){this.wobble+=this.wobbleSpeed;this.vx+=Math.sin(this.wobble)*0.05;this.vy+=0.02;for(const hand of h){for(const pt of hand){const px=(1-pt.x)*W,py=pt.y*H,dx=this.x-px,dy=this.y-py,dist=Math.sqrt(dx*dx+dy*dy),r=90;if(dist<r&&dist>1){const f=(r-dist)/r*8;this.vx+=dx/dist*f;this.vy+=dy/dist*f;}}}this.vx*=.97;this.vy=Math.min(this.vy*.97,4);this.x+=this.vx;this.y+=this.vy;if(this.x<this.r){this.x=this.r;this.vx*=-.5;}if(this.x>W-this.r){this.x=W-this.r;this.vx*=-.5;}if(this.y>H+20)this.reset(false);}draw(){ctx.save();ctx.globalAlpha=this.alpha;if(this.sparkle){ctx.strokeStyle=`rgba(200,230,255,${this.alpha})`;ctx.lineWidth=1;for(let i=0;i<6;i++){const angle=i*Math.PI/3+this.wobble*0.1;ctx.beginPath();ctx.moveTo(this.x,this.y);ctx.lineTo(this.x+Math.cos(angle)*this.r*1.5,this.y+Math.sin(angle)*this.r*1.5);ctx.stroke();}}const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,this.r*2);g.addColorStop(0,'rgba(220,240,255,1)');g.addColorStop(.4,'rgba(150,200,255,0.8)');g.addColorStop(1,'rgba(100,160,255,0)');ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();ctx.restore();}}
+function init(){particles=[];for(let i=0;i<150;i++)particles.push(new Snow());}
+function initMP(){hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];document.getElementById('handCount').textContent=handLandmarks.length;});document.getElementById('spinner').style.display='none';document.getElementById('startBtn').style.display='block';document.querySelector('#loading p').textContent='Model siap!';}
+async function startApp(){document.getElementById('startBtn').disabled=true;try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});video.srcObject=s;await video.play();new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:640,height:480}).start();document.getElementById('loading').style.display='none';loop();}catch(e){document.getElementById('startBtn').textContent='❌ Izin Ditolak';document.getElementById('startBtn').disabled=false;}}
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm){ctx.save();ctx.globalAlpha=0.9;for(const[a,b]of CONN){const ax=(1-lm[a].x)*W,ay=lm[a].y*H,bx=(1-lm[b].x)*W,by=lm[b].y*H;ctx.strokeStyle='rgba(0,200,255,0.3)';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();ctx.strokeStyle='rgba(100,230,255,1)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();}for(const pt of lm){const x=(1-pt.x)*W,y=pt.y*H;ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fillStyle='rgba(0,200,255,0.4)';ctx.fill();ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();}ctx.restore();}
+let lt=0,fc=0,ft=0;
+function loop(ts=0){requestAnimationFrame(loop);const dt=ts-lt;lt=ts;fc++;ft+=dt;if(ft>500){document.getElementById('fps').textContent=Math.round(fc/ft*1000);fc=0;ft=0;}ctx.fillStyle='rgba(0,5,15,0.15)';ctx.fillRect(0,0,W,H);for(const p of particles){p.update(handLandmarks);p.draw();}document.getElementById('particleCount').textContent=particles.length;if(handLandmarks.length>0){document.getElementById('status').textContent='❄️ Dorong saljunya!';for(const h of handLandmarks)drawHand(h);}else{document.getElementById('status').textContent='Arahkan tangan ke kamera 🖐️';}}
+init();setTimeout(initMP,300);
+</script>
+</body>
+</html>
