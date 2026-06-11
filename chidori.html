@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Chidori ⚡</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; color: #fff; touch-action: none; }
+#container { position: relative; width: 100vw; height: 100vh; }
+#video { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 1; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#ui { position: absolute; top: 16px; left: 16px; z-index: 10; background: rgba(0,0,20,0.7); border: 1px solid rgba(100,150,255,0.4); border-radius: 10px; padding: 10px 14px; font-size: 11px; line-height: 1.8; }
+#ui .label { color: #88aaff; } #ui .val { color: #fff; font-weight: bold; }
+#status { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); font-size: 13px; color: rgba(180,200,255,0.9); z-index: 10; background: rgba(0,0,20,0.6); padding: 8px 18px; border-radius: 20px; white-space: nowrap; }
+#loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg,#000010,#000); z-index: 100; gap: 16px; }
+#loading h1 { font-size: 32px; color: #88aaff; letter-spacing: 4px; text-shadow: 0 0 30px #4466ff, 0 0 60px #2244cc; }
+#loading p { color: #445588; font-size: 13px; }
+.spinner { width: 40px; height: 40px; border: 3px solid #111122; border-top-color: #4466ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#startBtn { padding: 14px 32px; background: rgba(50,80,200,0.2); border: 1px solid #4466ff; color: #88aaff; font-family: inherit; font-size: 15px; border-radius: 30px; cursor: pointer; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="ui">
+    <div><span class="label">Tangan: </span><span class="val" id="handCount">0</span></div>
+    <div><span class="label">Power: </span><span class="val" id="power">0%</span></div>
+    <div><span class="label">FPS: </span><span class="val" id="fps">0</span></div>
+  </div>
+  <div id="status">Angkat tangan ke kamera ⚡</div>
+</div>
+<div id="loading">
+  <h1>⚡ CHIDORI ⚡</h1>
+  <p>Memuat chakra system...</p>
+  <div class="spinner" id="spinner"></div>
+  <button id="startBtn" style="display:none" onclick="startApp()">⚡ Aktifkan Chidori</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script>
+const video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+let handLandmarks=[],hands,power=0;
+function lightning(x1,y1,x2,y2,rough,color,alpha){if(rough<2){ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=color;ctx.lineWidth=rough<0.5?1:2;ctx.shadowBlur=15;ctx.shadowColor=color;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore();return;}const mx=(x1+x2)/2+(Math.random()-.5)*rough*2;const my=(y1+y2)/2+(Math.random()-.5)*rough*2;lightning(x1,y1,mx,my,rough/2,color,alpha);lightning(mx,my,x2,y2,rough/2,color,alpha);}
+function drawChidori(lm,intensity){const pts=[0,1,5,9,13,17];let px=0,py=0;for(const i of pts){px+=(1-lm[i].x)*W;py+=lm[i].y*H;}px/=pts.length;py/=pts.length;const fingertips=[4,8,12,16,20];ctx.save();const r=60+intensity*40;const grad=ctx.createRadialGradient(px,py,0,px,py,r);grad.addColorStop(0,`rgba(150,180,255,${0.6*intensity})`);grad.addColorStop(0.3,`rgba(80,120,255,${0.4*intensity})`);grad.addColorStop(0.7,`rgba(30,60,200,${0.2*intensity})`);grad.addColorStop(1,'rgba(0,0,100,0)');ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fillStyle=grad;ctx.fill();const coreGrad=ctx.createRadialGradient(px,py,0,px,py,20+intensity*15);coreGrad.addColorStop(0,`rgba(255,255,255,${0.9*intensity})`);coreGrad.addColorStop(0.5,`rgba(180,200,255,${0.6*intensity})`);coreGrad.addColorStop(1,'rgba(100,150,255,0)');ctx.beginPath();ctx.arc(px,py,20+intensity*15,0,Math.PI*2);ctx.fillStyle=coreGrad;ctx.fill();if(intensity>0.3){for(const i of fingertips){const fx=(1-lm[i].x)*W,fy=lm[i].y*H;const bolts=Math.floor(intensity*4)+2;for(let b=0;b<bolts;b++){lightning(px,py,fx,fy,15*intensity,'rgba(150,180,255,0.8)',0.7*intensity);lightning(px,py,fx,fy,8*intensity,'rgba(220,230,255,0.9)',0.5*intensity);}}}const sparks=Math.floor(intensity*20);for(let s=0;s<sparks;s++){const angle=Math.random()*Math.PI*2;const dist=10+Math.random()*r*0.8;const ex=px+Math.cos(angle)*dist;const ey=py+Math.sin(angle)*dist;const ex2=ex+(Math.random()-.5)*40;const ey2=ey+(Math.random()-.5)*40;lightning(ex,ey,ex2,ey2,5,'rgba(180,200,255,0.8)',0.6*intensity);}if(intensity>0.8){for(let i=0;i<3;i++){const ex=Math.random()*W,ey=Math.random()*H;lightning(px,py,ex,ey,20,'rgba(100,150,255,0.3)',0.3);}ctx.globalAlpha=0.05*intensity;ctx.fillStyle='rgba(50,80,200,1)';ctx.fillRect(0,0,W,H);}ctx.restore();}
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm,intensity){ctx.save();ctx.globalAlpha=0.5+intensity*0.3;for(const[a,b]of CONN){const ax=(1-lm[a].x)*W,ay=lm[a].y*H,bx=(1-lm[b].x)*W,by=lm[b].y*H;ctx.strokeStyle=`rgba(${80+intensity*120},${100+intensity*100},255,0.6)`;ctx.lineWidth=2;ctx.shadowBlur=8*intensity;ctx.shadowColor='#4466ff';ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();}for(const pt of lm){const x=(1-pt.x)*W,y=pt.y*H;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle=`rgba(180,200,255,${0.6+intensity*0.4})`;ctx.shadowBlur=10*intensity;ctx.shadowColor='#88aaff';ctx.fill();}ctx.restore();}
+function initMP(){hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];document.getElementById('handCount').textContent=handLandmarks.length;});document.getElementById('spinner').style.display='none';document.getElementById('startBtn').style.display='block';document.querySelector('#loading p').textContent='Chakra siap!';}
+async function startApp(){document.getElementById('startBtn').disabled=true;try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});video.srcObject=s;await video.play();new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:640,height:480}).start();document.getElementById('loading').style.display='none';loop();}catch(e){document.getElementById('startBtn').textContent='❌ Izin Ditolak';document.getElementById('startBtn').disabled=false;}}
+let lt=0,fc=0,ft=0;
+function loop(ts=0){requestAnimationFrame(loop);const dt=ts-lt;lt=ts;fc++;ft+=dt;if(ft>500){document.getElementById('fps').textContent=Math.round(fc/ft*1000);fc=0;ft=0;}ctx.fillStyle='rgba(0,0,5,0.3)';ctx.fillRect(0,0,W,H);if(handLandmarks.length>0){power=Math.min(1,power+0.02);document.getElementById('status').textContent='⚡ CHIDORI AKTIF!';for(const lm of handLandmarks){drawChidori(lm,power);drawHand(lm,power);}}else{power=Math.max(0,power-0.05);document.getElementById('status').textContent='Angkat tangan ke kamera ⚡';}document.getElementById('power').textContent=Math.round(power*100)+'%';}
+setTimeout(initMP,300);
+</script>
+</body>
+</html>
