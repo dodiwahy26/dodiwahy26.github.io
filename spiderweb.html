@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Spider Web 🕷️</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; color: #fff; touch-action: none; }
+#container { position: relative; width: 100vw; height: 100vh; }
+#video { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 1; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#ui { position: absolute; top: 16px; left: 16px; z-index: 10; background: rgba(10,0,20,0.8); border: 1px solid rgba(180,100,255,0.4); border-radius: 10px; padding: 10px 14px; font-size: 11px; line-height: 1.8; }
+#ui .label { color: #cc88ff; } #ui .val { color: #fff; font-weight: bold; }
+#status { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); font-size: 13px; color: rgba(220,180,255,0.9); z-index: 10; background: rgba(10,0,20,0.7); padding: 8px 18px; border-radius: 20px; white-space: nowrap; }
+#loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg,#0a0015,#000); z-index: 100; gap: 16px; }
+#loading h1 { font-size: 28px; color: #cc88ff; letter-spacing: 4px; text-shadow: 0 0 30px #aa44ff; }
+#loading p { color: #443355; font-size: 13px; }
+.spinner { width: 40px; height: 40px; border: 3px solid #1a0025; border-top-color: #aa44ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#startBtn { padding: 16px 36px; background: rgba(100,30,180,0.3); border: 2px solid #aa44ff; color: #cc88ff; font-family: inherit; font-size: 16px; border-radius: 30px; cursor: pointer; letter-spacing: 2px; box-shadow: 0 0 20px rgba(150,50,255,0.4); }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="ui">
+    <div><span class="label">Tangan: </span><span class="val" id="handCount">0</span></div>
+    <div><span class="label">Jarak: </span><span class="val" id="dist">-</span></div>
+    <div><span class="label">FPS: </span><span class="val" id="fps">0</span></div>
+  </div>
+  <div id="status">Tunjukkan 2 tangan ke kamera 🕷️</div>
+</div>
+<div id="loading">
+  <h1>🕷️ SPIDER WEB 🕷️</h1>
+  <p id="loadText">Memutar jaring...</p>
+  <div class="spinner" id="spinner"></div>
+  <button id="startBtn" style="display:none" onclick="startApp()">🕷️ Aktifkan Jaring!</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script>
+const video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+let handLandmarks=[],hands,t=0,webPower=0;
+
+function drawWeb(lm1,lm2,power){
+  const tips1=[4,8,12,16,20];
+  const pts=[0,5,9,13,17];
+  let cx1=0,cy1=0,cx2=0,cy2=0;
+  for(const i of pts){
+    cx1+=(1-lm1[i].x)*W;cy1+=lm1[i].y*H;
+    cx2+=(1-lm2[i].x)*W;cy2+=lm2[i].y*H;
+  }
+  cx1/=pts.length;cy1/=pts.length;
+  cx2/=pts.length;cy2/=pts.length;
+
+  const dist=Math.sqrt((cx2-cx1)**2+(cy2-cy1)**2);
+  const tension=Math.min(1,dist/(W*0.4));
+  document.getElementById('dist').textContent=Math.round(dist)+'px';
+
+  const sag=Math.max(0,(1-tension)*120);
+  const hue=tension>0.7?0:tension>0.4?270:280;
+  const mainColor=`hsla(${hue},80%,70%,1)`;
+  const glowColor=`hsla(${hue},100%,80%,0.5)`;
+
+  const f1=tips1.map(i=>({x:(1-lm1[i].x)*W,y:lm1[i].y*H}));
+  const f2=tips1.map(i=>({x:(1-lm2[i].x)*W,y:lm2[i].y*H}));
+
+  ctx.save();
+
+  // Cross strands
+  for(let i=0;i<5;i++){
+    for(let j=0;j<5;j++){
+      if(Math.abs(i-j)<=1){
+        const mid={
+          x:(f1[i].x+f2[j].x)/2+Math.sin(t*2+i*0.5)*10,
+          y:(f1[i].y+f2[j].y)/2+sag*0.3+Math.cos(t*1.5+j*0.5)*8
+        };
+        ctx.globalAlpha=power*(0.4+tension*0.4);
+        ctx.strokeStyle=mainColor;ctx.lineWidth=0.8+tension;
+        ctx.shadowBlur=6;ctx.shadowColor=glowColor;
+        ctx.beginPath();ctx.moveTo(f1[i].x,f1[i].y);
+        ctx.quadraticCurveTo(mid.x,mid.y,f2[j].x,f2[j].y);ctx.stroke();
+      }
+    }
+  }
+
+  const midX=(cx1+cx2)/2,midY=(cy1+cy2)/2+sag;
+
+  // Anchor lines to center
+  for(let i=0;i<5;i++){
+    ctx.globalAlpha=power*0.7;
+    ctx.strokeStyle=mainColor;ctx.lineWidth=1+tension*0.5;
+    ctx.shadowBlur=10;ctx.shadowColor=glowColor;
+    ctx.beginPath();ctx.moveTo(f1[i].x,f1[i].y);
+    ctx.quadraticCurveTo(midX,midY+sag*0.3,midX,midY);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(f2[i].x,f2[i].y);
+    ctx.quadraticCurveTo(midX,midY+sag*0.3,midX,midY);ctx.stroke();
+  }
+
+  // Concentric rings
+  for(let r=1;r<=6;r++){
+    const frac=r/6;
+    const ringPts=8;
+    const pts2=[];
+    for(let p=0;p<ringPts;p++){
+      const angle=(p/ringPts)*Math.PI*2+t*0.3;
+      const rsize=(dist/2)*frac*0.4;
+      const mx=(cx1+cx2)/2,my=(cy1+cy2)/2+sag*frac;
+      pts2.push({x:mx+Math.cos(angle)*rsize+Math.sin(t+p)*5,y:my+Math.sin(angle)*rsize*0.5+Math.cos(t*0.8+p)*5});
+    }
+    ctx.globalAlpha=power*(0.15+frac*0.25);
+    ctx.strokeStyle=`hsla(${hue+frac*30},80%,70%,1)`;
+    ctx.lineWidth=0.5+frac*0.3;ctx.shadowBlur=4;ctx.shadowColor=glowColor;
+    ctx.beginPath();ctx.moveTo(pts2[0].x,pts2[0].y);
+    for(let p=1;p<ringPts;p++)ctx.lineTo(pts2[p].x,pts2[p].y);
+    ctx.closePath();ctx.stroke();
+  }
+
+  // Center orb
+  const nodeGrad=ctx.createRadialGradient(midX,midY,0,midX,midY,20+tension*15);
+  nodeGrad.addColorStop(0,`hsla(${hue},100%,90%,${power})`);
+  nodeGrad.addColorStop(0.5,`hsla(${hue},80%,60%,${power*0.5})`);
+  nodeGrad.addColorStop(1,`hsla(${hue},60%,40%,0)`);
+  ctx.beginPath();ctx.arc(midX,midY,20+tension*15,0,Math.PI*2);
+  ctx.fillStyle=nodeGrad;ctx.globalAlpha=power;ctx.fill();
+
+  // Pulse ring
+  ctx.beginPath();ctx.arc(midX,midY,(30+tension*20)*(1+Math.sin(t*4)*0.2),0,Math.PI*2);
+  ctx.strokeStyle=`hsla(${hue},100%,80%,${power*0.4})`;
+  ctx.lineWidth=2;ctx.shadowBlur=20;ctx.stroke();
+
+  // Tension sparks
+  if(tension>0.6){
+    const sparks=Math.floor(tension*8);
+    for(let s=0;s<sparks;s++){
+      const frac2=Math.random();
+      const sx=cx1+(cx2-cx1)*frac2+(Math.random()-.5)*30;
+      const sy=cy1+(cy2-cy1)*frac2+(Math.random()-.5)*30;
+      ctx.globalAlpha=power*(tension-0.6)*0.8;
+      ctx.strokeStyle=`hsla(${Math.random()*60},100%,80%,1)`;
+      ctx.lineWidth=1;ctx.shadowBlur=8;
+      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(sx+(Math.random()-.5)*40,sy+(Math.random()-.5)*40);ctx.stroke();
+    }
+  }
+
+  // Fingertip glows
+  for(const tip of [...f1,...f2]){
+    const grad=ctx.createRadialGradient(tip.x,tip.y,0,tip.x,tip.y,15);
+    grad.addColorStop(0,`hsla(${hue},100%,90%,${power*0.8})`);
+    grad.addColorStop(1,`hsla(${hue},80%,50%,0)`);
+    ctx.beginPath();ctx.arc(tip.x,tip.y,15,0,Math.PI*2);
+    ctx.fillStyle=grad;ctx.globalAlpha=power;ctx.fill();
+  }
+  ctx.restore();
+}
+
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm){
+  ctx.save();ctx.globalAlpha=0.5;
+  for(const[a,b]of CONN){
+    const ax=(1-lm[a].x)*W,ay=lm[a].y*H,bx=(1-lm[b].x)*W,by=lm[b].y*H;
+    ctx.strokeStyle='rgba(180,100,255,0.8)';ctx.lineWidth=1.5;ctx.shadowBlur=6;ctx.shadowColor='#aa44ff';
+    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();
+  }
+  for(const pt of lm){
+    const x=(1-pt.x)*W,y=pt.y*H;
+    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+  }
+  ctx.restore();
+}
+
+function initMP(){
+  hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+  hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});
+  hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];document.getElementById('handCount').textContent=handLandmarks.length;});
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('startBtn').style.display='block';
+  document.getElementById('loadText').textContent='Jaring siap! Tekan tombol.';
+}
+
+async function startApp(){
+  document.getElementById('startBtn').disabled=true;
+  document.getElementById('startBtn').textContent='Menghubungkan...';
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
+    video.srcObject=s;await video.play();
+    new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:640,height:480}).start();
+    document.getElementById('loading').style.display='none';loop();
+  }catch(e){
+    document.getElementById('startBtn').textContent='❌ Izin Ditolak - Tap Lagi';
+    document.getElementById('startBtn').disabled=false;
+  }
+}
+
+let lt=0,fc=0,ft=0;
+function loop(ts=0){
+  requestAnimationFrame(loop);
+  const dt=ts-lt;lt=ts;fc++;ft+=dt;
+  if(ft>500){document.getElementById('fps').textContent=Math.round(fc/ft*1000);fc=0;ft=0;}
+  ctx.clearRect(0,0,W,H);
+  t+=0.04;
+
+  if(handLandmarks.length===2){
+    webPower=Math.min(1,webPower+0.04);
+    document.getElementById('status').textContent='🕷️ Jaring aktif! Rentangkan tangan!';
+    drawHand(handLandmarks[0]);drawHand(handLandmarks[1]);
+    drawWeb(handLandmarks[0],handLandmarks[1],webPower);
+  } else if(handLandmarks.length===1){
+    webPower=Math.max(0,webPower-0.06);
+    drawHand(handLandmarks[0]);
+    document.getElementById('status').textContent='🕷️ Butuh 2 tangan!';
+    document.getElementById('dist').textContent='-';
+  } else {
+    webPower=Math.max(0,webPower-0.06);
+    document.getElementById('status').textContent='Tunjukkan 2 tangan ke kamera 🕷️';
+    document.getElementById('dist').textContent='-';
+  }
+}
+setTimeout(initMP,300);
+</script>
+</body>
+</html>
