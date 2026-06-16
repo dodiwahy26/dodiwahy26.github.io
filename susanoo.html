@@ -45,6 +45,7 @@ body { background: #000; overflow: hidden; font-family: 'Courier New', monospace
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
 <script>
 const video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
 const flashOverlay=document.getElementById('flashOverlay'),chakraFill=document.getElementById('chakraFill');
@@ -52,7 +53,7 @@ let W,H;
 function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
 resize();window.addEventListener('resize',resize);
 
-let handLandmarks=[],hands,t=0,power=0,bigStrikeTimer=0,nextBigStrike=50;
+let handLandmarks=[],faceLandmarks=null,hands,face,t=0,power=0,bigStrikeTimer=0,nextBigStrike=50;
 let screenShake={x:0,y:0,decay:0};
 
 function lightning(x1,y1,x2,y2,rough,color,alpha,width=1){
@@ -72,14 +73,11 @@ function megaLightning(){
   const startY=-50;
   const endX=startX+(Math.random()-0.5)*W*0.4;
   const endY=H+50;
-
   for(let pass=0;pass<3;pass++){
     const offset=(pass-1)*8;
     lightning(startX+offset,startY,endX+offset,endY,80,
-      pass===1?'rgba(255,255,255,1)':'rgba(255,150,80,0.8)',
-      1,pass===1?3:1.5);
+      pass===1?'rgba(255,255,255,1)':'rgba(255,150,80,0.8)',1,pass===1?3:1.5);
   }
-
   const branchCount=4+Math.floor(Math.random()*4);
   for(let i=0;i<branchCount;i++){
     const frac=Math.random();
@@ -87,19 +85,124 @@ function megaLightning(){
     const by=startY+(endY-startY)*frac;
     const angle=(Math.random()-0.5)*Math.PI*0.8;
     const len=100+Math.random()*200;
-    const bex=bx+Math.cos(angle)*len;
-    const bey=by+Math.sin(angle)*len+100;
-    lightning(bx,by,bex,bey,30,'rgba(255,180,100,0.7)',0.8,1);
+    lightning(bx,by,bx+Math.cos(angle)*len,by+Math.sin(angle)*len+100,30,'rgba(255,180,100,0.7)',0.8,1);
   }
-
   flashOverlay.style.transition='opacity 0.05s';
   flashOverlay.style.opacity='0.45';
-  setTimeout(()=>{
-    flashOverlay.style.transition='opacity 0.35s';
-    flashOverlay.style.opacity='0';
-  },50);
-
+  setTimeout(()=>{flashOverlay.style.transition='opacity 0.35s';flashOverlay.style.opacity='0';},50);
   screenShake.decay=1;
+}
+
+function drawOniMask(headX,headY,headWidth,powerLevel,rotation){
+  if(powerLevel<0.15) return;
+  ctx.save();
+  ctx.translate(headX,headY);
+  ctx.rotate(rotation*0.05);
+
+  const scale=powerLevel;
+  const maskW=headWidth*1.8*scale;
+  const maskH=headWidth*2.0*scale;
+  const hue=15;
+  const glow=`hsla(${hue},100%,${55+powerLevel*20}%,1)`;
+  const darkRed=`hsla(${hue-5},90%,30%,${powerLevel*0.5})`;
+
+  ctx.globalAlpha=powerLevel;
+
+  ctx.beginPath();
+  ctx.moveTo(-maskW*0.5,-maskH*0.15);
+  ctx.quadraticCurveTo(-maskW*0.55,-maskH*0.75,0,-maskH*0.85);
+  ctx.quadraticCurveTo(maskW*0.55,-maskH*0.75,maskW*0.5,-maskH*0.15);
+  ctx.strokeStyle=glow;ctx.lineWidth=3*scale;
+  ctx.shadowBlur=20;ctx.shadowColor=glow;
+  ctx.stroke();
+  ctx.fillStyle=darkRed;ctx.fill();
+
+  for(let i=1;i<=4;i++){
+    const f=i/5;
+    ctx.beginPath();
+    ctx.moveTo(-maskW*0.5*(1-f*0.3),-maskH*0.15-maskH*0.6*f);
+    ctx.quadraticCurveTo(0,-maskH*0.85*f,maskW*0.5*(1-f*0.3),-maskH*0.15-maskH*0.6*f);
+    ctx.strokeStyle=`hsla(${hue},90%,${50+powerLevel*15}%,${powerLevel*0.6})`;
+    ctx.lineWidth=1.5*scale;ctx.shadowBlur=10;
+    ctx.stroke();
+  }
+
+  for(const side of [-1,1]){
+    ctx.beginPath();
+    const hx=side*maskW*0.35;
+    ctx.moveTo(hx,-maskH*0.55);
+    ctx.quadraticCurveTo(
+      hx+side*maskW*0.35,-maskH*1.1,
+      hx+side*maskW*0.25,-maskH*1.45
+    );
+    ctx.strokeStyle=glow;ctx.lineWidth=4*scale;
+    ctx.shadowBlur=18;ctx.shadowColor=glow;
+    ctx.lineCap='round';
+    ctx.stroke();
+
+    const tipX=hx+side*maskW*0.25,tipY=-maskH*1.45;
+    const tipGrad=ctx.createRadialGradient(tipX,tipY,0,tipX,tipY,15*scale);
+    tipGrad.addColorStop(0,`hsla(${hue},100%,80%,${powerLevel})`);
+    tipGrad.addColorStop(1,'rgba(255,100,0,0)');
+    ctx.beginPath();ctx.arc(tipX,tipY,15*scale,0,Math.PI*2);
+    ctx.fillStyle=tipGrad;ctx.fill();
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(-maskW*0.5,-maskH*0.1);
+  ctx.lineTo(-maskW*0.42,maskH*0.15);
+  ctx.lineTo(-maskW*0.25,maskH*0.32);
+  ctx.lineTo(0,maskH*0.4);
+  ctx.lineTo(maskW*0.25,maskH*0.32);
+  ctx.lineTo(maskW*0.42,maskH*0.15);
+  ctx.lineTo(maskW*0.5,-maskH*0.1);
+  ctx.strokeStyle=glow;ctx.lineWidth=3*scale;
+  ctx.shadowBlur=15;ctx.shadowColor=glow;
+  ctx.stroke();
+
+  for(const side of [-1,1]){
+    ctx.beginPath();
+    ctx.moveTo(side*maskW*0.45,-maskH*0.05);
+    ctx.lineTo(side*maskW*0.3,maskH*0.2);
+    ctx.strokeStyle=`hsla(${hue},90%,55%,${powerLevel*0.7})`;
+    ctx.lineWidth=2*scale;ctx.shadowBlur=8;
+    ctx.stroke();
+  }
+
+  for(const side of [-1,1]){
+    const ex=side*maskW*0.22,ey=-maskH*0.02;
+    ctx.save();
+    ctx.translate(ex,ey);
+    ctx.rotate(side*0.25);
+    const eyeGrad=ctx.createRadialGradient(0,0,0,0,0,18*scale);
+    eyeGrad.addColorStop(0,`rgba(255,255,255,${powerLevel})`);
+    eyeGrad.addColorStop(0.3,`hsla(${hue},100%,60%,${powerLevel})`);
+    eyeGrad.addColorStop(1,'rgba(255,50,0,0)');
+    ctx.beginPath();
+    ctx.ellipse(0,0,18*scale,8*scale,0,0,Math.PI*2);
+    ctx.fillStyle=eyeGrad;ctx.fill();
+    ctx.strokeStyle=glow;ctx.lineWidth=1.5*scale;ctx.shadowBlur=10;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(0,-maskH*0.05);
+  ctx.lineTo(0,maskH*0.22);
+  ctx.strokeStyle=`hsla(${hue},90%,55%,${powerLevel*0.6})`;
+  ctx.lineWidth=2*scale;ctx.shadowBlur=8;
+  ctx.stroke();
+
+  for(const side of [-1,1]){
+    ctx.beginPath();
+    ctx.moveTo(side*maskW*0.08,maskH*0.3);
+    ctx.lineTo(side*maskW*0.04,maskH*0.4);
+    ctx.strokeStyle=`hsla(40,100%,80%,${powerLevel*0.8})`;
+    ctx.lineWidth=2*scale;ctx.shadowBlur=8;ctx.shadowColor='#ffcc00';
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 function drawSusanooAura(handsArr,powerLevel){
@@ -135,19 +238,6 @@ function drawSusanooAura(handsArr,powerLevel){
   ctx.lineWidth=4;ctx.shadowBlur=25;
   ctx.beginPath();ctx.moveTo(bodyCenterX,bodyTop);ctx.lineTo(bodyCenterX,bodyBottom);ctx.stroke();
 
-  if(powerLevel>0.65){
-    const eyeY=bodyTop-80;
-    const eyeSpacing=60*powerLevel;
-    for(const dx of [-eyeSpacing,eyeSpacing]){
-      const grad=ctx.createRadialGradient(bodyCenterX+dx,eyeY,0,bodyCenterX+dx,eyeY,25);
-      grad.addColorStop(0,`rgba(255,255,255,${powerLevel})`);
-      grad.addColorStop(0.4,`rgba(255,50,0,${powerLevel*0.8})`);
-      grad.addColorStop(1,'rgba(255,0,0,0)');
-      ctx.beginPath();ctx.arc(bodyCenterX+dx,eyeY,25,0,Math.PI*2);
-      ctx.fillStyle=grad;ctx.fill();
-    }
-  }
-
   for(let i=0;i<Math.floor(powerLevel*20);i++){
     const px=bodyCenterX+(Math.random()-0.5)*200*powerLevel;
     const py=bodyBottom-((t*50+i*30)%(bodyBottom-bodyTop));
@@ -168,9 +258,7 @@ function drawHandLightning(lm,powerLevel){
   for(let i=0;i<bolts;i++){
     const angle=Math.random()*Math.PI*2;
     const len=30+Math.random()*60*powerLevel;
-    const ex=cx+Math.cos(angle)*len;
-    const ey=cy+Math.sin(angle)*len;
-    lightning(cx,cy,ex,ey,10,`hsla(${15+Math.random()*15},100%,70%,${0.7*powerLevel})`,0.7*powerLevel,1);
+    lightning(cx,cy,cx+Math.cos(angle)*len,cy+Math.sin(angle)*len,10,`hsla(${15+Math.random()*15},100%,70%,${0.7*powerLevel})`,0.7*powerLevel,1);
   }
 }
 
@@ -191,10 +279,21 @@ function drawHand(lm,powerLevel){
   ctx.restore();
 }
 
+let faceReady=false;
+function initFace(){
+  face=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
+  face.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  face.onResults(r=>{
+    faceLandmarks=(r.multiFaceLandmarks&&r.multiFaceLandmarks[0])?r.multiFaceLandmarks[0]:null;
+  });
+  faceReady=true;
+}
+
 function initMP(){
   hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
   hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});
   hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];});
+  initFace();
   document.getElementById('spinner').style.display='none';
   document.getElementById('startBtn').style.display='block';
   document.getElementById('loadText').textContent='Chakra Uchiha siap!';
@@ -206,7 +305,10 @@ async function startApp(){
   try{
     const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
     video.srcObject=s;await video.play();
-    new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:640,height:480}).start();
+    new Camera(video,{onFrame:async()=>{
+      await hands.send({image:video});
+      if(faceReady) await face.send({image:video});
+    },width:640,height:480}).start();
     document.getElementById('loading').style.display='none';
     loop();
   }catch(e){
@@ -240,6 +342,21 @@ function loop(ts=0){
 
     for(const lm of handLandmarks){drawHand(lm,power);drawHandLightning(lm,power);}
     drawSusanooAura(handLandmarks,power);
+
+    if(faceLandmarks){
+      const fx=(1-faceLandmarks[10].x)*W;
+      const fy=faceLandmarks[10].y*H;
+      const leftX=(1-faceLandmarks[234].x)*W;
+      const rightX=(1-faceLandmarks[454].x)*W;
+      const headWidth=Math.abs(rightX-leftX);
+      const tilt=(faceLandmarks[234].y-faceLandmarks[454].y)*W;
+      drawOniMask(fx,fy,headWidth,power,tilt);
+    } else {
+      let cx=0,cy=0,count=0;
+      for(const lm of handLandmarks){for(const i of [0,5,9,13,17]){cx+=(1-lm[i].x)*W;cy+=lm[i].y*H;count++;}}
+      cx/=count;cy/=count;
+      drawOniMask(cx,cy-150,W*0.12,power,0);
+    }
 
     if(power>0.5){
       ctx.fillStyle=`rgba(${100+Math.random()*50},30,0,${0.03*power})`;
