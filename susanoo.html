@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Susanoo ⚡🔥</title>
+<title>Susanoo Perfect Form ⚡🔥</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; color: #fff; touch-action: none; }
@@ -15,7 +15,7 @@ body { background: #000; overflow: hidden; font-family: 'Courier New', monospace
 #status { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); font-size: 14px; font-weight: bold; color: rgba(255,200,150,0.95); z-index: 10; background: rgba(30,0,0,0.7); padding: 10px 22px; border-radius: 20px; white-space: nowrap; text-shadow: 0 0 10px #ff4400; }
 #loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg,#1a0500,#000); z-index: 100; gap: 16px; }
 #loading h1 { font-size: 26px; background: linear-gradient(90deg,#ff4400,#ffaa00,#ff0066); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing: 3px; }
-#loading p { color: #553322; font-size: 13px; }
+#loading p { color: #cc6644; font-size: 13px; }
 .spinner { width: 40px; height: 40px; border: 3px solid #221100; border-top-color: #ff4400; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #startBtn { padding: 16px 36px; background: rgba(200,50,0,0.3); border: 2px solid #ff4400; color: #ffaa66; font-family: inherit; font-size: 16px; border-radius: 30px; cursor: pointer; letter-spacing: 2px; box-shadow: 0 0 20px rgba(255,68,0,0.5); }
@@ -43,8 +43,9 @@ body { background: #000; overflow: hidden; font-family: 'Courier New', monospace
   <div class="spinner" id="spinner"></div>
   <button id="startBtn" style="display:none" onclick="startApp()">⚡ BANGKITKAN SUSANOO!</button>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
 <script>
 const video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
@@ -55,6 +56,7 @@ resize();window.addEventListener('resize',resize);
 
 let handLandmarks=[],faceLandmarks=null,hands,face,t=0,power=0,bigStrikeTimer=0,nextBigStrike=50;
 let screenShake={x:0,y:0,decay:0};
+let handsReady=false,faceReady=false;
 
 function lightning(x1,y1,x2,y2,rough,color,alpha,width=1){
   if(rough<2){
@@ -78,130 +80,57 @@ function megaLightning(){
     lightning(startX+offset,startY,endX+offset,endY,80,
       pass===1?'rgba(255,255,255,1)':'rgba(255,150,80,0.8)',1,pass===1?3:1.5);
   }
-  const branchCount=4+Math.floor(Math.random()*4);
-  for(let i=0;i<branchCount;i++){
-    const frac=Math.random();
-    const bx=startX+(endX-startX)*frac;
-    const by=startY+(endY-startY)*frac;
-    const angle=(Math.random()-0.5)*Math.PI*0.8;
-    const len=100+Math.random()*200;
-    lightning(bx,by,bx+Math.cos(angle)*len,by+Math.sin(angle)*len+100,30,'rgba(255,180,100,0.7)',0.8,1);
-  }
   flashOverlay.style.transition='opacity 0.05s';
   flashOverlay.style.opacity='0.45';
   setTimeout(()=>{flashOverlay.style.transition='opacity 0.35s';flashOverlay.style.opacity='0';},50);
   screenShake.decay=1;
 }
 
+// PERBAIKAN 1: Ukuran & Rotasi Topeng Oni yang Presisi
 function drawOniMask(headX,headY,headWidth,powerLevel,rotation){
   if(powerLevel<0.15) return;
   ctx.save();
   ctx.translate(headX,headY);
-  ctx.rotate(rotation*0.05);
+  ctx.rotate(rotation); // Menggunakan radian asli hasil Math.atan2
 
-  const scale=powerLevel;
-  const maskW=headWidth*1.8*scale;
-  const maskH=headWidth*2.0*scale;
+  const maskW=headWidth*1.8;
+  const maskH=headWidth*2.0;
   const hue=15;
   const glow=`hsla(${hue},100%,${55+powerLevel*20}%,1)`;
   const darkRed=`hsla(${hue-5},90%,30%,${powerLevel*0.5})`;
 
   ctx.globalAlpha=powerLevel;
 
+  // Mask Base
   ctx.beginPath();
   ctx.moveTo(-maskW*0.5,-maskH*0.15);
   ctx.quadraticCurveTo(-maskW*0.55,-maskH*0.75,0,-maskH*0.85);
   ctx.quadraticCurveTo(maskW*0.55,-maskH*0.75,maskW*0.5,-maskH*0.15);
-  ctx.strokeStyle=glow;ctx.lineWidth=3*scale;
+  ctx.strokeStyle=glow;ctx.lineWidth=3;
   ctx.shadowBlur=20;ctx.shadowColor=glow;
-  ctx.stroke();
-  ctx.fillStyle=darkRed;ctx.fill();
+  ctx.stroke();ctx.fillStyle=darkRed;ctx.fill();
 
-  for(let i=1;i<=4;i++){
-    const f=i/5;
-    ctx.beginPath();
-    ctx.moveTo(-maskW*0.5*(1-f*0.3),-maskH*0.15-maskH*0.6*f);
-    ctx.quadraticCurveTo(0,-maskH*0.85*f,maskW*0.5*(1-f*0.3),-maskH*0.15-maskH*0.6*f);
-    ctx.strokeStyle=`hsla(${hue},90%,${50+powerLevel*15}%,${powerLevel*0.6})`;
-    ctx.lineWidth=1.5*scale;ctx.shadowBlur=10;
-    ctx.stroke();
-  }
-
+  // Horns (Tanduk)
   for(const side of [-1,1]){
     ctx.beginPath();
     const hx=side*maskW*0.35;
     ctx.moveTo(hx,-maskH*0.55);
-    ctx.quadraticCurveTo(
-      hx+side*maskW*0.35,-maskH*1.1,
-      hx+side*maskW*0.25,-maskH*1.45
-    );
-    ctx.strokeStyle=glow;ctx.lineWidth=4*scale;
-    ctx.shadowBlur=18;ctx.shadowColor=glow;
-    ctx.lineCap='round';
-    ctx.stroke();
-
-    const tipX=hx+side*maskW*0.25,tipY=-maskH*1.45;
-    const tipGrad=ctx.createRadialGradient(tipX,tipY,0,tipX,tipY,15*scale);
-    tipGrad.addColorStop(0,`hsla(${hue},100%,80%,${powerLevel})`);
-    tipGrad.addColorStop(1,'rgba(255,100,0,0)');
-    ctx.beginPath();ctx.arc(tipX,tipY,15*scale,0,Math.PI*2);
-    ctx.fillStyle=tipGrad;ctx.fill();
+    ctx.quadraticCurveTo(hx+side*maskW*0.35,-maskH*1.1,hx+side*maskW*0.25,-maskH*1.45);
+    ctx.strokeStyle=glow;ctx.lineWidth=4;ctx.shadowBlur=18;ctx.shadowColor=glow;
+    ctx.lineCap='round';ctx.stroke();
   }
 
-  ctx.beginPath();
-  ctx.moveTo(-maskW*0.5,-maskH*0.1);
-  ctx.lineTo(-maskW*0.42,maskH*0.15);
-  ctx.lineTo(-maskW*0.25,maskH*0.32);
-  ctx.lineTo(0,maskH*0.4);
-  ctx.lineTo(maskW*0.25,maskH*0.32);
-  ctx.lineTo(maskW*0.42,maskH*0.15);
-  ctx.lineTo(maskW*0.5,-maskH*0.1);
-  ctx.strokeStyle=glow;ctx.lineWidth=3*scale;
-  ctx.shadowBlur=15;ctx.shadowColor=glow;
-  ctx.stroke();
-
-  for(const side of [-1,1]){
-    ctx.beginPath();
-    ctx.moveTo(side*maskW*0.45,-maskH*0.05);
-    ctx.lineTo(side*maskW*0.3,maskH*0.2);
-    ctx.strokeStyle=`hsla(${hue},90%,55%,${powerLevel*0.7})`;
-    ctx.lineWidth=2*scale;ctx.shadowBlur=8;
-    ctx.stroke();
-  }
-
+  // Eyes (Mata)
   for(const side of [-1,1]){
     const ex=side*maskW*0.22,ey=-maskH*0.02;
-    ctx.save();
-    ctx.translate(ex,ey);
-    ctx.rotate(side*0.25);
-    const eyeGrad=ctx.createRadialGradient(0,0,0,0,0,18*scale);
+    ctx.save();ctx.translate(ex,ey);ctx.rotate(side*0.25);
+    const eyeGrad=ctx.createRadialGradient(0,0,0,0,0,18);
     eyeGrad.addColorStop(0,`rgba(255,255,255,${powerLevel})`);
     eyeGrad.addColorStop(0.3,`hsla(${hue},100%,60%,${powerLevel})`);
     eyeGrad.addColorStop(1,'rgba(255,50,0,0)');
-    ctx.beginPath();
-    ctx.ellipse(0,0,18*scale,8*scale,0,0,Math.PI*2);
-    ctx.fillStyle=eyeGrad;ctx.fill();
-    ctx.strokeStyle=glow;ctx.lineWidth=1.5*scale;ctx.shadowBlur=10;
-    ctx.stroke();
-    ctx.restore();
+    ctx.beginPath();ctx.ellipse(0,0,18,8,0,0,Math.PI*2);
+    ctx.fillStyle=eyeGrad;ctx.fill();ctx.restore();
   }
-
-  ctx.beginPath();
-  ctx.moveTo(0,-maskH*0.05);
-  ctx.lineTo(0,maskH*0.22);
-  ctx.strokeStyle=`hsla(${hue},90%,55%,${powerLevel*0.6})`;
-  ctx.lineWidth=2*scale;ctx.shadowBlur=8;
-  ctx.stroke();
-
-  for(const side of [-1,1]){
-    ctx.beginPath();
-    ctx.moveTo(side*maskW*0.08,maskH*0.3);
-    ctx.lineTo(side*maskW*0.04,maskH*0.4);
-    ctx.strokeStyle=`hsla(40,100%,80%,${powerLevel*0.8})`;
-    ctx.lineWidth=2*scale;ctx.shadowBlur=8;ctx.shadowColor='#ffcc00';
-    ctx.stroke();
-  }
-
   ctx.restore();
 }
 
@@ -233,19 +162,6 @@ function drawSusanooAura(handsArr,powerLevel){
     ctx.quadraticCurveTo(bodyCenterX+wobble,ribY-30,bodyCenterX+ribWidth/2+wobble,ribY);
     ctx.stroke();
   }
-
-  ctx.strokeStyle=`hsla(15,100%,60%,${0.5*powerLevel})`;
-  ctx.lineWidth=4;ctx.shadowBlur=25;
-  ctx.beginPath();ctx.moveTo(bodyCenterX,bodyTop);ctx.lineTo(bodyCenterX,bodyBottom);ctx.stroke();
-
-  for(let i=0;i<Math.floor(powerLevel*20);i++){
-    const px=bodyCenterX+(Math.random()-0.5)*200*powerLevel;
-    const py=bodyBottom-((t*50+i*30)%(bodyBottom-bodyTop));
-    ctx.globalAlpha=powerLevel*0.5*Math.random();
-    ctx.beginPath();ctx.arc(px,py,2+Math.random()*3,0,Math.PI*2);
-    ctx.fillStyle=`hsla(${20+Math.random()*20},100%,60%,1)`;
-    ctx.shadowBlur=10;ctx.shadowColor='#ff6600';ctx.fill();
-  }
   ctx.restore();
 }
 
@@ -271,44 +187,47 @@ function drawHand(lm,powerLevel){
     ctx.lineWidth=2;ctx.shadowBlur=10*powerLevel;ctx.shadowColor='#ff6600';
     ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();
   }
-  for(const pt of lm){
-    const x=(1-pt.x)*W,y=pt.y*H;
-    ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,220,180,0.9)';ctx.shadowBlur=12;ctx.shadowColor='#ff4400';ctx.fill();
-  }
   ctx.restore();
 }
 
-let faceReady=false;
+// PERBAIKAN 2: Manajemen Loading Aset yang Sinkron
+function checkReady(){
+  if(handsReady && faceReady){
+    document.getElementById('spinner').style.display='none';
+    document.getElementById('startBtn').style.display='block';
+    document.getElementById('loadText').textContent='Chakra Uchiha siap!';
+  }
+}
+
 function initFace(){
   face=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
   face.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
-  face.onResults(r=>{
-    faceLandmarks=(r.multiFaceLandmarks&&r.multiFaceLandmarks[0])?r.multiFaceLandmarks[0]:null;
-  });
-  faceReady=true;
+  face.onResults(r=>{faceLandmarks=(r.multiFaceLandmarks&&r.multiFaceLandmarks[0])?r.multiFaceLandmarks[0]:null;});
+  face.initialize().then(()=>{ faceReady=true; checkReady(); });
 }
 
 function initMP(){
   hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
   hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});
   hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];});
-  initFace();
-  document.getElementById('spinner').style.display='none';
-  document.getElementById('startBtn').style.display='block';
-  document.getElementById('loadText').textContent='Chakra Uchiha siap!';
+  hands.initialize().then(()=>{ handsReady=true; initFace(); });
 }
 
+// PERBAIKAN 3: Eksekusi Tracking Paralel Menggunakan Promise.all
 async function startApp(){
   document.getElementById('startBtn').disabled=true;
   document.getElementById('startBtn').textContent='Menghubungkan...';
   try{
     const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
     video.srcObject=s;await video.play();
+    
     new Camera(video,{onFrame:async()=>{
-      await hands.send({image:video});
-      if(faceReady) await face.send({image:video});
+      const process=[]
+      if(handsReady) process.push(hands.send({image:video}));
+      if(faceReady) process.push(face.send({image:video}));
+      await Promise.all(process);
     },width:640,height:480}).start();
+    
     document.getElementById('loading').style.display='none';
     loop();
   }catch(e){
@@ -332,7 +251,9 @@ function loop(ts=0){
   canvas.style.transform=`translate(${screenShake.x}px,${screenShake.y}px)`;
   video.style.transform=`scaleX(-1) translate(${screenShake.x}px,${screenShake.y}px)`;
 
-  ctx.clearRect(0,0,W,H);
+  // PERBAIKAN 4: Menghapus ClearRect Kasar, Menggantinya dengan Efek Motion Blur Aura
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.3 - power*0.15})`; 
+  ctx.fillRect(0, 0, W, H);
   t+=0.05;
 
   if(handLandmarks.length>0){
@@ -348,19 +269,14 @@ function loop(ts=0){
       const fy=faceLandmarks[10].y*H;
       const leftX=(1-faceLandmarks[234].x)*W;
       const rightX=(1-faceLandmarks[454].x)*W;
+      const leftY=faceLandmarks[234].y*H;
+      const rightY=faceLandmarks[454].y*H;
+      
       const headWidth=Math.abs(rightX-leftX);
-      const tilt=(faceLandmarks[234].y-faceLandmarks[454].y)*W;
-      drawOniMask(fx,fy,headWidth,power,tilt);
-    } else {
-      let cx=0,cy=0,count=0;
-      for(const lm of handLandmarks){for(const i of [0,5,9,13,17]){cx+=(1-lm[i].x)*W;cy+=lm[i].y*H;count++;}}
-      cx/=count;cy/=count;
-      drawOniMask(cx,cy-150,W*0.12,power,0);
-    }
-
-    if(power>0.5){
-      ctx.fillStyle=`rgba(${100+Math.random()*50},30,0,${0.03*power})`;
-      ctx.fillRect(0,0,W,H);
+      // Koreksi sudut kemiringan menggunakan Trigonometri Math.atan2
+      const angle = Math.atan2(rightY - leftY, rightX - leftX);
+      
+      drawOniMask(fx,fy,headWidth,power,angle);
     }
   } else {
     power=Math.max(0,power-0.03);
