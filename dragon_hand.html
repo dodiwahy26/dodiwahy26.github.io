@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AR Dragon Effect</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#000; font-family: 'Segoe UI', sans-serif;
+  }
+  #container { position:relative; width:100vw; height:100vh; }
+  video { display:none; }
+  canvas {
+    position:absolute; top:0; left:0;
+    width:100%; height:100%;
+    transform: scaleX(-1); /* mirror biar natural kayak cermin */
+  }
+  #ui {
+    position:absolute; top:0; left:0; width:100%;
+    padding:16px; z-index:10; pointer-events:none;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  #title {
+    color:#ffb347; font-size:15px; font-weight:700; letter-spacing:1px;
+    text-shadow: 0 0 12px rgba(255,140,0,0.8);
+  }
+  #hint {
+    color:#ffd9a0; font-size:11px; opacity:0.85; text-align:center;
+    text-shadow: 0 0 6px rgba(0,0,0,0.9);
+  }
+  #status {
+    position:absolute; bottom:18px; left:0; width:100%;
+    text-align:center; color:#ff8c00; font-size:12px;
+    text-shadow: 0 0 8px rgba(255,140,0,0.6);
+    z-index:10; pointer-events:none;
+  }
+  #loading {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:#000; display:flex; align-items:center; justify-content:center;
+    color:#ff8c00; font-size:16px; z-index:20; flex-direction:column; gap:14px;
+  }
+  .spinner {
+    width:40px; height:40px; border:3px solid rgba(255,140,0,0.2);
+    border-top-color:#ff8c00; border-radius:50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="webcam" playsinline autoplay muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="ui">
+    <div id="title">🐉 DRAGON SUMMON</div>
+    <div id="hint">Kepalkan tangan lalu buka cepat untuk semburan api</div>
+  </div>
+  <div id="status">Mencari tangan...</div>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div>Memuat model tracking tangan...</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+const videoEl = document.getElementById('webcam');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const loadingEl = document.getElementById('loading');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ---------- STATE ----------
+let handPresent = false;
+let palmOpenness = 0;       // 0 (fist) -> 1 (open)
+let prevOpenness = 0;
+let fireBurst = 0;          // frames remaining for fire breath
+let fireParticles = [];
+let embers = [];
+let time = 0;
+
+// Dragon spine: a chain of segments that follow the hand (head) with a delay,
+// creating a flowing, lagging serpentine motion like a CGI dragon.
+const SEGMENT_COUNT = 26;
+let spine = [];
+for (let i = 0; i < SEGMENT_COUNT; i++) {
+  spine.push({ x: canvas.width/2, y: canvas.height/2 });
+}
+
+let headTarget = { x: canvas.width/2, y: canvas.height/2 };
+let handSize = 60; // scale reference (distance wrist->middle finger tip)
+
+// ---------- DRAGON DRAW HELPERS ----------
+function updateSpine() {
+  // head chases the fingertip target
+  spine[0].x += (headTarget.x - spine[0].x) * 0.35;
+  spine[0].y += (headTarget.y - spine[0].y) * 0.35;
+
+  // each following segment chases the previous one at fixed distance (rope physics)
+  const linkDist = Math.max(8, handSize * 0.22);
+  for (let i = 1; i < spine.length; i++) {
+    const prev = spine[i-1];
+    const cur = spine[i];
+    const dx = prev.x - cur.x;
+    const dy = prev.y - cur.y;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
+    const targetDist = linkDist;
+    const diff = (dist - targetDist) / dist;
+    cur.x += dx * diff * 0.6;
+    cur.y += dy * diff * 0.6;
+
+    // subtle undulation wave along the body for a "swimming" feel
+    const wave = Math.sin(time * 0.08 + i * 0.5) * 3;
+    cur.x += wave * 0.3;
+  }
+}
+
+function drawDragonBody() {
+  if (!handPresent) return;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // glow underlayer
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.beginPath();
+    ctx.moveTo(spine[0].x, spine[0].y);
+    for (let i = 1; i < spine.length - 1; i++) {
+      const xc = (spine[i].x + spine[i+1].x) / 2;
+      const yc = (spine[i].y + spine[i+1].y) / 2;
+      ctx.quadraticCurveTo(spine[i].x, spine[i].y, xc, yc);
+    }
+    const grad = ctx.createLinearGradient(
+      spine[0].x, spine[0].y, spine[spine.length-1].x, spine[spine.length-1].y
+    );
+    grad.addColorStop(0, 'rgba(255,200,80,0.9)');
+    grad.addColorStop(0.4, 'rgba(255,120,20,0.8)');
+    grad.addColorStop(1, 'rgba(120,20,180,0.15)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = pass === 0 ? Math.max(6, handSize*0.16) : Math.max(18, handSize*0.4);
+    ctx.globalAlpha = pass === 0 ? 1 : 0.25;
+    ctx.shadowColor = '#ff8c00';
+    ctx.shadowBlur = pass === 0 ? 14 : 30;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // scale ridges — little triangular fins along the spine
+  for (let i = 2; i < spine.length - 2; i += 2) {
+    const a = spine[i], b = spine[i-1];
+    const angle = Math.atan2(a.y - b.y, a.x - b.x) + Math.PI/2;
+    const size = Math.max(3, handSize * 0.09) * (1 - i / spine.length);
+    const fx = a.x + Math.cos(angle) * size;
+    const fy = a.y + Math.sin(angle) * size;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(fx, fy);
+    ctx.lineTo(a.x - Math.cos(angle)*2, a.y - Math.sin(angle)*2);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,180,60,0.7)';
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = '#ffae42';
+    ctx.fill();
+  }
+
+  drawHead();
+  ctx.restore();
+}
+
+function drawHead() {
+  const head = spine[0];
+  const neck = spine[2];
+  const angle = Math.atan2(head.y - neck.y, head.x - neck.x);
+  const s = Math.max(14, handSize * 0.4);
+
+  ctx.save();
+  ctx.translate(head.x, head.y);
+  ctx.rotate(angle);
+
+  // head shape (diamond-ish dragon head)
+  ctx.beginPath();
+  ctx.moveTo(s*1.4, 0);
+  ctx.lineTo(s*0.2, -s*0.7);
+  ctx.lineTo(-s*0.8, -s*0.35);
+  ctx.lineTo(-s*0.8, s*0.35);
+  ctx.lineTo(s*0.2, s*0.7);
+  ctx.closePath();
+  const hg = ctx.createRadialGradient(0,0,2, 0,0,s*1.5);
+  hg.addColorStop(0, '#fff2c9');
+  hg.addColorStop(0.5, '#ff9d2f');
+  hg.addColorStop(1, '#a8320a');
+  ctx.fillStyle = hg;
+  ctx.shadowColor = '#ffb347';
+  ctx.shadowBlur = 20;
+  ctx.fill();
+
+  // horns
+  ctx.strokeStyle = 'rgba(255,240,210,0.9)';
+  ctx.lineWidth = Math.max(2, s*0.08);
+  ctx.beginPath();
+  ctx.moveTo(-s*0.2, -s*0.5);
+  ctx.lineTo(-s*0.6, -s*1.3);
+  ctx.moveTo(s*0.1, -s*0.55);
+  ctx.lineTo(-s*0.1, -s*1.4);
+  ctx.stroke();
+
+  // eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(s*0.5, -s*0.15, s*0.1, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#1a0500';
+  ctx.beginPath();
+  ctx.arc(s*0.55, -s*0.15, s*0.05, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+
+  // mouth position for fire breath origin
+  return { x: head.x + Math.cos(angle)*s*1.4, y: head.y + Math.sin(angle)*s*1.4, angle };
+}
+
+function spawnFireBreath(origin) {
+  for (let i = 0; i < 6; i++) {
+    const spread = (Math.random() - 0.5) * 0.6;
+    const speed = 6 + Math.random() * 6;
+    fireParticles.push({
+      x: origin.x, y: origin.y,
+      vx: Math.cos(origin.angle + spread) * speed,
+      vy: Math.sin(origin.angle + spread) * speed,
+      life: 1, size: 6 + Math.random() * 10,
+      hue: Math.random() < 0.5 ? '255,140,0' : '255,220,90'
+    });
+  }
+}
+
+function updateAndDrawFire() {
+  for (let i = fireParticles.length - 1; i >= 0; i--) {
+    const p = fireParticles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.96; p.vy *= 0.96;
+    p.life -= 0.03;
+    p.size *= 0.98;
+    if (p.life <= 0) { fireParticles.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(0.5,p.size), 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${p.hue},${p.life})`;
+    ctx.shadowColor = `rgba(${p.hue},1)`;
+    ctx.shadowBlur = 16;
+    ctx.fill();
+  }
+}
+
+function spawnEmbers() {
+  if (Math.random() < 0.5 && handPresent) {
+    const seg = spine[Math.floor(Math.random()*spine.length)];
+    embers.push({
+      x: seg.x + (Math.random()-0.5)*10,
+      y: seg.y + (Math.random()-0.5)*10,
+      vy: -0.5 - Math.random()*1.2,
+      vx: (Math.random()-0.5)*0.6,
+      life: 1, size: 1.5 + Math.random()*2.5
+    });
+  }
+}
+
+function updateAndDrawEmbers() {
+  for (let i = embers.length - 1; i >= 0; i--) {
+    const e = embers[i];
+    e.x += e.vx; e.y += e.vy; e.life -= 0.015;
+    if (e.life <= 0) { embers.splice(i,1); continue; }
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.size, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,180,80,${e.life})`;
+    ctx.shadowColor = '#ffb347';
+    ctx.shadowBlur = 6;
+    ctx.fill();
+  }
+}
+
+// ---------- MEDIAPIPE HANDS ----------
+const hands = new Hands({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
+
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+hands.onResults((results) => {
+  loadingEl.style.display = 'none';
+
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    handPresent = true;
+    statusEl.textContent = 'Naga aktif — gerakkan tangan';
+    const lm = results.multiHandLandmarks[0];
+
+    // fingertip (index finger tip = landmark 8) drives the head
+    const tip = lm[8];
+    headTarget.x = (1 - tip.x) * canvas.width; // account for mirrored display
+    headTarget.y = tip.y * canvas.height;
+
+    // hand scale reference: wrist(0) to middle-finger-mcp(9)
+    const wrist = lm[0], mid = lm[9];
+    handSize = Math.hypot((wrist.x-mid.x)*canvas.width, (wrist.y-mid.y)*canvas.height) * 3.2;
+
+    // openness: average distance of fingertips from wrist, normalized
+    const tips = [4,8,12,16,20];
+    let sum = 0;
+    tips.forEach(idx => sum += dist(lm[idx], wrist));
+    palmOpenness = Math.min(1, (sum / tips.length) * 3.2);
+
+    // fire trigger: rapid transition from closed -> open
+    if (palmOpenness - prevOpenness > 0.35 && fireBurst <= 0) {
+      fireBurst = 18;
+    }
+    prevOpenness = palmOpenness;
+  } else {
+    handPresent = false;
+    statusEl.textContent = 'Mencari tangan...';
+  }
+});
+
+const camera = new Camera(videoEl, {
+  onFrame: async () => { await hands.send({ image: videoEl }); },
+  width: 640, height: 480
+});
+camera.start().catch(err => {
+  statusEl.textContent = 'Kamera tidak tersedia: izinkan akses kamera';
+  loadingEl.innerHTML = '<div style="color:#ff5555">Gagal mengakses kamera.<br>Pastikan izin kamera diaktifkan.</div>';
+});
+
+// ---------- MAIN LOOP ----------
+function draw() {
+  time++;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // faint mirror of video feed as backdrop (optional dark tint)
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  try { ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height); } catch(e) {}
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.restore();
+
+  if (handPresent) {
+    updateSpine();
+    drawDragonBody();
+    spawnEmbers();
+
+    if (fireBurst > 0) {
+      const head = spine[0];
+      const neck = spine[2];
+      const angle = Math.atan2(head.y - neck.y, head.x - neck.x);
+      const mouth = { x: head.x + Math.cos(angle)*handSize*0.6, y: head.y + Math.sin(angle)*handSize*0.6, angle };
+      spawnFireBreath(mouth);
+      fireBurst--;
+    }
+  }
+
+  updateAndDrawFire();
+  updateAndDrawEmbers();
+
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
