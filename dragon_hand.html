@@ -132,46 +132,76 @@ function drawDragonBody() {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // glow underlayer
-  for (let pass = 0; pass < 2; pass++) {
+  // Build left/right offset points along the spine to form a tapered serpent body
+  const leftPts = [];
+  const rightPts = [];
+  for (let i = 0; i < spine.length; i++) {
+    const cur = spine[i];
+    const next = spine[Math.min(i + 1, spine.length - 1)];
+    const prev = spine[Math.max(i - 1, 0)];
+    const angle = Math.atan2(next.y - prev.y, next.x - prev.x) + Math.PI / 2;
+    // taper: thick near head, thin near tail
+    const t = i / (spine.length - 1);
+    const width = Math.max(1.5, handSize * 0.34 * (1 - t * 0.92)) * (0.85 + 0.15 * Math.sin(time * 0.1 + i * 0.4));
+    leftPts.push({ x: cur.x + Math.cos(angle) * width, y: cur.y + Math.sin(angle) * width });
+    rightPts.push({ x: cur.x - Math.cos(angle) * width, y: cur.y - Math.sin(angle) * width });
+  }
+
+  // outer glow pass
+  ctx.beginPath();
+  ctx.moveTo(leftPts[0].x, leftPts[0].y);
+  for (let i = 1; i < leftPts.length; i++) ctx.lineTo(leftPts[i].x, leftPts[i].y);
+  for (let i = rightPts.length - 1; i >= 0; i--) ctx.lineTo(rightPts[i].x, rightPts[i].y);
+  ctx.closePath();
+  ctx.shadowColor = '#ff8c00';
+  ctx.shadowBlur = 28;
+  const bodyGrad = ctx.createLinearGradient(spine[0].x, spine[0].y, spine[spine.length - 1].x, spine[spine.length - 1].y);
+  bodyGrad.addColorStop(0, '#ffcf6b');
+  bodyGrad.addColorStop(0.35, '#e8720f');
+  bodyGrad.addColorStop(0.75, '#9c2f0e');
+  bodyGrad.addColorStop(1, 'rgba(70,15,40,0.2)');
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // belly highlight strip
+  ctx.beginPath();
+  ctx.moveTo(spine[0].x, spine[0].y);
+  for (let i = 1; i < spine.length; i++) ctx.lineTo(spine[i].x, spine[i].y);
+  ctx.strokeStyle = 'rgba(255,235,180,0.35)';
+  ctx.lineWidth = Math.max(1, handSize * 0.06);
+  ctx.stroke();
+
+  // scale texture: little arcs across the body
+  ctx.strokeStyle = 'rgba(90,20,10,0.45)';
+  ctx.lineWidth = 1.2;
+  for (let i = 2; i < spine.length - 1; i += 2) {
+    const l = leftPts[i], r = rightPts[i];
     ctx.beginPath();
-    ctx.moveTo(spine[0].x, spine[0].y);
-    for (let i = 1; i < spine.length - 1; i++) {
-      const xc = (spine[i].x + spine[i+1].x) / 2;
-      const yc = (spine[i].y + spine[i+1].y) / 2;
-      ctx.quadraticCurveTo(spine[i].x, spine[i].y, xc, yc);
-    }
-    const grad = ctx.createLinearGradient(
-      spine[0].x, spine[0].y, spine[spine.length-1].x, spine[spine.length-1].y
-    );
-    grad.addColorStop(0, 'rgba(255,200,80,0.9)');
-    grad.addColorStop(0.4, 'rgba(255,120,20,0.8)');
-    grad.addColorStop(1, 'rgba(120,20,180,0.15)');
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = pass === 0 ? Math.max(6, handSize*0.16) : Math.max(18, handSize*0.4);
-    ctx.globalAlpha = pass === 0 ? 1 : 0.25;
-    ctx.shadowColor = '#ff8c00';
-    ctx.shadowBlur = pass === 0 ? 14 : 30;
+    ctx.moveTo(l.x, l.y);
+    ctx.quadraticCurveTo(spine[i].x, spine[i].y + 3, r.x, r.y);
     ctx.stroke();
   }
-  ctx.globalAlpha = 1;
 
-  // scale ridges — little triangular fins along the spine
-  for (let i = 2; i < spine.length - 2; i += 2) {
-    const a = spine[i], b = spine[i-1];
-    const angle = Math.atan2(a.y - b.y, a.x - b.x) + Math.PI/2;
-    const size = Math.max(3, handSize * 0.09) * (1 - i / spine.length);
-    const fx = a.x + Math.cos(angle) * size;
-    const fy = a.y + Math.sin(angle) * size;
+  // dorsal spikes along the back (top edge, alternating)
+  for (let i = 1; i < spine.length - 1; i += 2) {
+    const l = leftPts[i];
+    const t = i / (spine.length - 1);
+    const spikeLen = Math.max(2, handSize * 0.22 * (1 - t * 0.85));
+    const dx = l.x - spine[i].x, dy = l.y - spine[i].y;
+    const norm = Math.hypot(dx, dy) || 1;
+    const tipX = spine[i].x + (dx / norm) * (norm + spikeLen);
+    const tipY = spine[i].y + (dy / norm) * (norm + spikeLen);
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(fx, fy);
-    ctx.lineTo(a.x - Math.cos(angle)*2, a.y - Math.sin(angle)*2);
+    ctx.moveTo(l.x, l.y);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(rightPts[i] ? spine[i].x + dx * 0.3 : l.x, spine[i].y + dy * 0.3);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255,180,60,0.7)';
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = '#ffae42';
+    ctx.fillStyle = 'rgba(255,210,120,0.85)';
+    ctx.shadowColor = '#ffb347';
+    ctx.shadowBlur = 6;
     ctx.fill();
+    ctx.shadowBlur = 0;
   }
 
   drawHead();
@@ -182,53 +212,131 @@ function drawHead() {
   const head = spine[0];
   const neck = spine[2];
   const angle = Math.atan2(head.y - neck.y, head.x - neck.x);
-  const s = Math.max(14, handSize * 0.4);
+  const s = Math.max(16, handSize * 0.5);
+  const jawOpen = 0.15 + palmOpenness * 0.5; // mouth opens more when hand is open
 
   ctx.save();
   ctx.translate(head.x, head.y);
   ctx.rotate(angle);
 
-  // head shape (diamond-ish dragon head)
+  // flowing mane strands behind the head (toward the neck)
+  ctx.strokeStyle = 'rgba(255,190,90,0.55)';
+  ctx.lineCap = 'round';
+  for (let m = 0; m < 4; m++) {
+    const off = (m - 1.5) * s * 0.18;
+    const wag = Math.sin(time * 0.15 + m) * s * 0.15;
+    ctx.lineWidth = Math.max(1, s * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.6, off * 0.6);
+    ctx.quadraticCurveTo(-s * 1.3, off + wag, -s * 2.1, off * 1.4 + wag);
+    ctx.stroke();
+  }
+
+  // upper snout (skull + brow ridge, tapering to nose)
   ctx.beginPath();
-  ctx.moveTo(s*1.4, 0);
-  ctx.lineTo(s*0.2, -s*0.7);
-  ctx.lineTo(-s*0.8, -s*0.35);
-  ctx.lineTo(-s*0.8, s*0.35);
-  ctx.lineTo(s*0.2, s*0.7);
+  ctx.moveTo(-s * 0.75, -s * 0.55);          // back of skull, top
+  ctx.quadraticCurveTo(-s * 0.1, -s * 0.75, s * 0.55, -s * 0.42); // brow ridge
+  ctx.quadraticCurveTo(s * 1.15, -s * 0.28, s * 1.55, -s * 0.08); // snout bridge to nose tip
+  ctx.lineTo(s * 1.3, s * 0.02);              // nose tip underside
+  ctx.quadraticCurveTo(s * 0.6, -s * 0.02, -s * 0.1, s * 0.02);  // upper jaw line back to mouth hinge
+  ctx.quadraticCurveTo(-s * 0.55, s * 0.05, -s * 0.75, -s * 0.1);
   ctx.closePath();
-  const hg = ctx.createRadialGradient(0,0,2, 0,0,s*1.5);
-  hg.addColorStop(0, '#fff2c9');
-  hg.addColorStop(0.5, '#ff9d2f');
-  hg.addColorStop(1, '#a8320a');
-  ctx.fillStyle = hg;
+  const upperGrad = ctx.createLinearGradient(-s * 0.7, -s * 0.6, s * 1.5, s * 0.1);
+  upperGrad.addColorStop(0, '#8a2a0a');
+  upperGrad.addColorStop(0.5, '#e8720f');
+  upperGrad.addColorStop(1, '#ffd98c');
+  ctx.fillStyle = upperGrad;
   ctx.shadowColor = '#ffb347';
-  ctx.shadowBlur = 20;
+  ctx.shadowBlur = 18;
+  ctx.fill();
+
+  // lower jaw (opens based on hand openness)
+  ctx.save();
+  ctx.translate(-s * 0.1, s * 0.03);
+  ctx.rotate(jawOpen * 0.9);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(s * 0.6, s * 0.1, s * 1.15, s * 0.18);
+  ctx.quadraticCurveTo(s * 0.55, s * 0.32, -s * 0.15, s * 0.28);
+  ctx.quadraticCurveTo(-s * 0.5, s * 0.2, -s * 0.6, s * 0.05);
+  ctx.closePath();
+  ctx.fillStyle = '#7a2408';
+  ctx.shadowBlur = 10;
+  ctx.fill();
+  // teeth on lower jaw
+  ctx.fillStyle = '#fff6e0';
+  for (let ti = 0; ti < 3; ti++) {
+    const tx = s * (0.15 + ti * 0.32);
+    ctx.beginPath();
+    ctx.moveTo(tx, s * 0.08);
+    ctx.lineTo(tx + s * 0.06, s * 0.02);
+    ctx.lineTo(tx + s * 0.12, s * 0.08);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // upper teeth
+  ctx.fillStyle = '#fff6e0';
+  for (let ti = 0; ti < 3; ti++) {
+    const tx = s * (0.2 + ti * 0.32);
+    ctx.beginPath();
+    ctx.moveTo(tx, s * 0.02);
+    ctx.lineTo(tx + s * 0.06, s * 0.11);
+    ctx.lineTo(tx + s * 0.12, s * 0.02);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // nostril
+  ctx.fillStyle = 'rgba(40,10,5,0.8)';
+  ctx.beginPath();
+  ctx.ellipse(s * 1.15, -s * 0.16, s * 0.06, s * 0.03, 0.4, 0, Math.PI * 2);
   ctx.fill();
 
   // horns
-  ctx.strokeStyle = 'rgba(255,240,210,0.9)';
-  ctx.lineWidth = Math.max(2, s*0.08);
+  ctx.strokeStyle = 'rgba(255,240,210,0.95)';
+  ctx.lineWidth = Math.max(2, s * 0.07);
   ctx.beginPath();
-  ctx.moveTo(-s*0.2, -s*0.5);
-  ctx.lineTo(-s*0.6, -s*1.3);
-  ctx.moveTo(s*0.1, -s*0.55);
-  ctx.lineTo(-s*0.1, -s*1.4);
+  ctx.moveTo(-s * 0.15, -s * 0.55);
+  ctx.quadraticCurveTo(-s * 0.35, -s * 1.1, -s * 0.75, -s * 1.35);
+  ctx.moveTo(s * 0.15, -s * 0.6);
+  ctx.quadraticCurveTo(0, -s * 1.15, -s * 0.25, -s * 1.5);
   ctx.stroke();
 
-  // eyes
-  ctx.fillStyle = '#fff';
+  // brow / eye ridge
+  ctx.fillStyle = 'rgba(60,15,5,0.9)';
   ctx.beginPath();
-  ctx.arc(s*0.5, -s*0.15, s*0.1, 0, Math.PI*2);
+  ctx.ellipse(s * 0.25, -s * 0.32, s * 0.22, s * 0.08, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // eye (glowing)
+  const eyeGrad = ctx.createRadialGradient(s * 0.35, -s * 0.22, 0, s * 0.35, -s * 0.22, s * 0.13);
+  eyeGrad.addColorStop(0, '#fff8d8');
+  eyeGrad.addColorStop(0.4, '#ffcf3d');
+  eyeGrad.addColorStop(1, 'rgba(255,140,0,0)');
+  ctx.fillStyle = eyeGrad;
+  ctx.beginPath();
+  ctx.arc(s * 0.35, -s * 0.22, s * 0.13, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#1a0500';
   ctx.beginPath();
-  ctx.arc(s*0.55, -s*0.15, s*0.05, 0, Math.PI*2);
+  ctx.ellipse(s * 0.38, -s * 0.22, s * 0.045, s * 0.06, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // whiskers from snout
+  ctx.strokeStyle = 'rgba(255,220,150,0.6)';
+  ctx.lineWidth = Math.max(1, s * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(s * 1.2, s * 0.0);
+  ctx.quadraticCurveTo(s * 1.6, s * 0.15 + Math.sin(time*0.2)*3, s * 1.9, s * 0.05 + Math.sin(time*0.2)*4);
+  ctx.stroke();
 
   ctx.restore();
 
-  // mouth position for fire breath origin
-  return { x: head.x + Math.cos(angle)*s*1.4, y: head.y + Math.sin(angle)*s*1.4, angle };
+  const mouthX = head.x + Math.cos(angle) * s * 1.3;
+  const mouthY = head.y + Math.sin(angle) * s * 1.3;
+  return { x: mouthX, y: mouthY, angle };
 }
 
 function spawnFireBreath(origin) {
@@ -319,7 +427,9 @@ hands.onResults((results) => {
 
     // hand scale reference: wrist(0) to middle-finger-mcp(9)
     const wrist = lm[0], mid = lm[9];
-    handSize = Math.hypot((wrist.x-mid.x)*canvas.width, (wrist.y-mid.y)*canvas.height) * 3.2;
+    const rawSize = Math.hypot((wrist.x-mid.x)*canvas.width, (wrist.y-mid.y)*canvas.height) * 1.6;
+    // clamp so the head can't balloon and cover the whole screen when the hand is close to the camera
+    handSize = Math.max(28, Math.min(90, rawSize));
 
     // openness: average distance of fingertips from wrist, normalized
     const tips = [4,8,12,16,20];
