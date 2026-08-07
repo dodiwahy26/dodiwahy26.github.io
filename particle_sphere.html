@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Sphere — Hand Control</title>
+<style>
+  :root{ --bg:#050506; --accent:#ffd27a; }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--bg); overflow:hidden;
+    font-family: -apple-system, 'Iowan Old Style', Georgia, serif;
+    color:#f2e9d8;
+  }
+  #stage{
+    position:relative; width:100vw; height:100vh;
+  }
+  video, canvas{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    object-fit:cover;
+  }
+  video{ transform:scaleX(-1); filter:brightness(0.55) contrast(1.05); }
+  #scene-canvas{ transform:scaleX(-1); }
+
+  #loading{
+    position:absolute; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:var(--bg); transition:opacity 0.6s ease;
+  }
+  #loading.hidden{ opacity:0; pointer-events:none; }
+  #loading .l-title{ font-family:'Iowan Old Style', Georgia, serif; font-size:22px; letter-spacing:2px; }
+  #loading .l-sub{ font-size:11px; letter-spacing:2px; opacity:0.6; margin-top:8px; text-transform:uppercase; }
+
+  .title-block{ position:absolute; top:20px; left:20px; z-index:5; pointer-events:none; }
+  .title-block h1{ font-size:20px; margin:0; letter-spacing:1px; }
+  .title-block p{ font-size:10px; margin:4px 0 0; letter-spacing:3px; opacity:0.6; text-transform:uppercase; }
+
+  #toggleBg{
+    position:absolute; top:20px; right:20px; z-index:5;
+    background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.25);
+    color:#f2e9d8; font-size:10px; letter-spacing:2px; text-transform:uppercase;
+    padding:8px 12px; border-radius:20px; cursor:pointer; backdrop-filter:blur(4px);
+  }
+  #toggleBg.off{ opacity:0.4; }
+
+  #status-panel{
+    position:absolute; left:20px; bottom:28px; z-index:5;
+    background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.15);
+    border-radius:10px; padding:10px 14px; font-size:12px; letter-spacing:1px;
+    backdrop-filter:blur(4px); min-width:140px;
+  }
+  #status-panel div{ display:flex; justify-content:space-between; gap:16px; padding:2px 0; }
+  #status-panel .label{ opacity:0.55; text-transform:uppercase; font-size:10px; letter-spacing:1px; }
+  #status-panel .val{ color:var(--accent); font-weight:600; }
+  #status-panel .mode{ margin-top:6px; font-size:11px; color:#8ee6b7; text-transform:uppercase; letter-spacing:1px; }
+
+  #hints{
+    position:absolute; right:20px; bottom:28px; z-index:5;
+    text-align:right; font-size:10px; line-height:1.6; opacity:0.55;
+    letter-spacing:0.5px; max-width:180px;
+  }
+  #hints b{ color:var(--accent); font-weight:600; }
+
+  @media (max-width: 640px){
+    .title-block{ top:16px; left:16px; }
+    .title-block h1{ font-size:16px; }
+    #toggleBg{ top:16px; right:16px; font-size:9px; padding:6px 10px; }
+    #status-panel{ left:16px; bottom:16px; font-size:11px; }
+    #hints{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="l-title">Particle Sphere</div>
+  <div class="l-sub">Requesting camera access…</div>
+</div>
+
+<div id="stage">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="scene-canvas"></canvas>
+
+  <div class="title-block">
+    <h1>Particle Sphere</h1>
+    <p>Hand-driven particle field</p>
+  </div>
+
+  <button id="toggleBg">● Webcam background</button>
+
+  <div id="status-panel">
+    <div><span class="label">Hands</span><span class="val" id="statHands">0</span></div>
+    <div><span class="label">Fingers</span><span class="val" id="statFingers">0</span></div>
+    <div><span class="label">Radius</span><span class="val" id="statRadius">0.00</span></div>
+    <div class="mode" id="statMode">Waiting for hand…</div>
+  </div>
+
+  <div id="hints">
+    <div><b>One hand</b> — move &amp; rotate sphere</div>
+    <div><b>Two hands</b> — pinch to resize</div>
+    <div><b>Pinch &amp; hold</b> — charge, release to explode</div>
+    <div><b>Fingers</b> — count controls density</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+(function(){
+  const video = document.getElementById('webcam');
+  const canvas = document.getElementById('scene-canvas');
+  const ctx = canvas.getContext('2d');
+  const loading = document.getElementById('loading');
+  const toggleBg = document.getElementById('toggleBg');
+  const statHands = document.getElementById('statHands');
+  const statFingers = document.getElementById('statFingers');
+  const statRadius = document.getElementById('statRadius');
+  const statMode = document.getElementById('statMode');
+
+  let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize(){
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- webcam background toggle ----------
+  let showWebcam = true;
+  toggleBg.addEventListener('click', ()=>{
+    showWebcam = !showWebcam;
+    video.style.visibility = showWebcam ? 'visible' : 'hidden';
+    toggleBg.classList.toggle('off', !showWebcam);
+  });
+
+  // ---------- particle sphere (fibonacci sphere) ----------
+  const N = 900;
+  const pts = [];
+  for(let i=0;i<N;i++){
+    const yv = 1 - (i / (N-1)) * 2;
+    const r = Math.sqrt(1 - yv*yv);
+    const phi = i * 2.399963; // golden angle
+    pts.push({
+      x: Math.cos(phi)*r, y: yv, z: Math.sin(phi)*r,
+      // explosion state
+      vx:0, vy:0, vz:0, ex:0, ey:0, ez:0
+    });
+  }
+
+  // sphere transform state
+  let sphere = {
+    cx: 0.5, cy: 0.45,   // normalized center (0..1) in mirrored screen space
+    tcx: 0.5, tcy: 0.45,
+    radius: 0.18,         // normalized radius relative to min(W,H)
+    targetRadius: 0.18,
+    rotY: 0, rotX: 0,
+    spinVel: 0.01,
+    charge: 0,
+    exploding: false,
+    explodeT: 0
+  };
+
+  let handsCount = 0;
+  let fingersCount = 0;
+  let mode = 'Waiting for hand…';
+
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function countFingers(landmarks, handedness){
+    // landmarks: 21 points, normalized (x,y in 0..1, mirrored already by mediapipe? we use as-is)
+    let count = 0;
+    const tips = [8,12,16,20];
+    const pips = [6,10,14,18];
+    for(let i=0;i<4;i++){
+      if(landmarks[tips[i]].y < landmarks[pips[i]].y - 0.02) count++;
+    }
+    // thumb: compare x depending on handedness
+    const thumbTip = landmarks[4], thumbIp = landmarks[3];
+    if(handedness === 'Right'){
+      if(thumbTip.x < thumbIp.x - 0.02) count++;
+    } else {
+      if(thumbTip.x > thumbIp.x + 0.02) count++;
+    }
+    return count;
+  }
+
+  function palmCenter(landmarks){
+    const idx = [0,5,9,13,17];
+    let x=0,y=0;
+    idx.forEach(i=>{ x+=landmarks[i].x; y+=landmarks[i].y; });
+    return { x:x/idx.length, y:y/idx.length };
+  }
+
+  function handSpan(landmarks){
+    // rough hand "openness" size: wrist to middle fingertip
+    return dist(landmarks[0], landmarks[12]);
+  }
+
+  function onResults(results){
+    handsCount = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+
+    if(handsCount === 0){
+      mode = 'Waiting for hand…';
+      sphere.charge = Math.max(0, sphere.charge - 0.04);
+      fingersCount = 0;
+    } else if(handsCount === 1){
+      const lm = results.multiHandLandmarks[0];
+      const handedness = results.multiHandedness[0].label;
+      const c = palmCenter(lm);
+      sphere.tcx = 1 - c.x; // un-mirror since video is mirrored visually
+      sphere.tcy = c.y;
+      const span = handSpan(lm);
+      sphere.targetRadius = Math.min(0.34, Math.max(0.08, span * 0.55));
+      fingersCount = countFingers(lm, handedness);
+
+      // pinch = thumb tip to index tip
+      const pinchDist = dist(lm[4], lm[8]);
+      if(pinchDist < 0.05){
+        sphere.charge = Math.min(1, sphere.charge + 0.035);
+        mode = sphere.charge >= 1 ? 'Charged — release to explode' : 'Charging…';
+      } else {
+        if(sphere.charge > 0.55 && !sphere.exploding){
+          triggerExplosion();
+        }
+        sphere.charge = Math.max(0, sphere.charge - 0.05);
+        mode = 'One hand — move & rotate';
+      }
+    } else {
+      // two hands -> pinch resize between hand centers
+      const c1 = palmCenter(results.multiHandLandmarks[0]);
+      const c2 = palmCenter(results.multiHandLandmarks[1]);
+      const mid = { x:(c1.x+c2.x)/2, y:(c1.y+c2.y)/2 };
+      sphere.tcx = 1 - mid.x;
+      sphere.tcy = mid.y;
+      const d = dist(c1,c2);
+      sphere.targetRadius = Math.min(0.4, Math.max(0.07, d * 0.6));
+      fingersCount = countFingers(results.multiHandLandmarks[0], results.multiHandedness[0].label)
+                   + countFingers(results.multiHandLandmarks[1], results.multiHandedness[1].label);
+      mode = 'Two hands — resizing';
+    }
+
+    statHands.textContent = handsCount;
+    statFingers.textContent = fingersCount;
+    statRadius.textContent = sphere.radius.toFixed(2);
+    statMode.textContent = mode;
+  }
+
+  function triggerExplosion(){
+    sphere.exploding = true;
+    sphere.explodeT = 0;
+    pts.forEach(p=>{
+      const speed = 0.02 + Math.random()*0.05;
+      p.vx = p.x * speed; p.vy = p.y * speed; p.vz = p.z * speed;
+    });
+  }
+
+  // ---------- mediapipe hands setup ----------
+  const hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.6
+  });
+  hands.onResults(onResults);
+
+  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user' }, audio:false })
+    .then(stream=>{
+      video.srcObject = stream;
+      video.onloadedmetadata = ()=>{
+        video.play();
+        resize();
+        loading.classList.add('hidden');
+        const camera = new Camera(video, {
+          onFrame: async ()=>{ await hands.send({ image: video }); },
+          width: 640, height: 480
+        });
+        camera.start();
+        requestAnimationFrame(loop);
+      };
+    })
+    .catch(err=>{
+      document.querySelector('#loading .l-sub').textContent =
+        'Camera access denied — please allow camera permission and reload.';
+    });
+
+  // ---------- render loop ----------
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.05, (now-last)/1000); last = now;
+    requestAnimationFrame(loop);
+
+    sphere.cx += (sphere.tcx - sphere.cx) * 0.15;
+    sphere.cy += (sphere.tcy - sphere.cy) * 0.15;
+    sphere.radius += (sphere.targetRadius - sphere.radius) * 0.15;
+    sphere.rotY += sphere.spinVel + sphere.charge*0.05;
+    sphere.rotX += 0.003;
+
+    if(sphere.exploding){
+      sphere.explodeT += dt;
+      if(sphere.explodeT > 1.6){
+        sphere.exploding = false;
+        pts.forEach(p=>{ p.vx=0; p.vy=0; p.vz=0; });
+      }
+    }
+
+    ctx.clearRect(0,0,W,H);
+
+    const base = Math.min(W,H);
+    const cx = sphere.cx * W;
+    const cy = sphere.cy * H;
+    const R = sphere.radius * base;
+    const chargeGlow = sphere.charge;
+
+    const cosY = Math.cos(sphere.rotY), sinY = Math.sin(sphere.rotY);
+    const cosX = Math.cos(sphere.rotX), sinX = Math.sin(sphere.rotX);
+
+    // depth-sort
+    const projected = [];
+    for(let i=0;i<pts.length;i++){
+      const p = pts[i];
+      let x = p.x, y = p.y, z = p.z;
+
+      if(sphere.exploding){
+        x += p.vx * sphere.explodeT * 6;
+        y += p.vy * sphere.explodeT * 6;
+        z += p.vz * sphere.explodeT * 6;
+      }
+
+      // rotate Y then X
+      let x1 = x*cosY - z*sinY;
+      let z1 = x*sinY + z*cosY;
+      let y1 = y*cosX - z1*sinX;
+      let z2 = y*sinX + z1*cosX;
+
+      const persp = 2.6 / (2.6 + z2);
+      const sx = cx + x1 * R * persp;
+      const sy = cy + y1 * R * persp;
+      const size = Math.max(0.6, (1.6 + chargeGlow*1.4) * persp);
+      const depth = z2;
+      projected.push({ sx, sy, size, depth, persp });
+    }
+    projected.sort((a,b)=>a.depth-b.depth);
+
+    for(const q of projected){
+      const alpha = 0.35 + 0.5 * ((q.persp-0.6)/0.8);
+      const hue = 40 + chargeGlow*20;
+      ctx.beginPath();
+      ctx.fillStyle = `hsla(${hue}, 80%, ${70+chargeGlow*15}%, ${Math.max(0.15,Math.min(0.9,alpha))})`;
+      ctx.arc(q.sx, q.sy, q.size, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // charging glow ring
+    if(chargeGlow > 0.05){
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(255,210,120,${chargeGlow*0.6})`;
+      ctx.lineWidth = 2;
+      ctx.arc(cx, cy, R*1.15, 0, Math.PI*2);
+      ctx.stroke();
+    }
+  }
+
+  resize();
+})();
+</script>
+</body>
+</html>
